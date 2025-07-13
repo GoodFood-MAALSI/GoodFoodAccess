@@ -2,49 +2,53 @@ import { Controller, Get, Req, Res, HttpStatus } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 
-// Contrôleur pour gérer l'authentification des requêtes inter-services
 @Controller('auth')
 export class AuthController {
-  // Clés secrètes pour les rôles pertinents (client uniquement)
-  private readonly JWT_SECRETS = {
-    client: process.env.CLIENT_SECRET
-  };
+  private readonly CLIENT_SECRET = process.env.CLIENT_SECRET;
+  private readonly RESTAURATEUR_SECRET = process.env.RESTAURATEUR_SECRET;
+  private readonly DELIVERY_SECRET = process.env.DELIVERY_SECRET;
 
-  // Endpoint appelé par le middleware ForwardAuth de Traefik
   @Get()
   async authenticate(@Req() req: Request, @Res() res: Response) {
-    // Récupérer le token JWT depuis l'en-tête Authorization
+    console.log('Authentification inter-service');
     const token = req.headers['authorization']?.split(' ')[1];
 
-    // Vérifier si le token est présent
     if (!token) {
+      console.log('Token manquant');
       return res.status(HttpStatus.UNAUTHORIZED).send('Token manquant');
     }
 
     try {
-      let decoded: any = null;
-      let userRole: string | null = null;
+      // Décoder le token sans vérification pour lire le claim 'service'
+      const decoded = jwt.decode(token) as any;
+      let secret: string;
 
-      // Essayer de valider le token avec chaque clé secrète
-      for (const [roleKey, secret] of Object.entries(this.JWT_SECRETS)) {
-        try {
-          decoded = jwt.verify(token, secret);
-          userRole = roleKey;
-          break;
-        } catch (err) {
-          continue;
+      if (decoded.service === 'client') {
+        if (!this.CLIENT_SECRET) {
+          throw new Error('CLIENT_SECRET non défini');
         }
+        secret = this.CLIENT_SECRET;
+      } else if (decoded.service === 'restaurateur') {
+        if (!this.RESTAURATEUR_SECRET) {
+          throw new Error('RESTAURATEUR_SECRET non défini');
+        }
+        secret = this.RESTAURATEUR_SECRET;
+      } else if (decoded.service === 'deliverer') {
+        if (!this.DELIVERY_SECRET) {
+          throw new Error('DELIVERY_SECRET non défini');
+        }
+        secret = this.DELIVERY_SECRET;
+      } else {
+        throw new Error('Service invalide dans le token');
       }
 
-      // Si le token est invalide ou aucun rôle n'est trouvé
-      if (!decoded || !userRole) {
-        return res.status(HttpStatus.UNAUTHORIZED).send('Token invalide');
-      }
-
-      // Retourner simplement un 200 OK, pas d'en-têtes nécessaires
-      res.status(HttpStatus.OK).send('');
+      // Vérifier le token avec le secret correspondant
+      jwt.verify(token, secret);
+      console.log('Token valide');
+      return res.status(HttpStatus.OK).send('');
     } catch (err) {
-      return res.status(HttpStatus.BAD_REQUEST).send('Erreur d\'authentification');
+      console.log('Token invalide:', err.message);
+      return res.status(HttpStatus.UNAUTHORIZED).send('Token invalide');
     }
   }
 }
